@@ -6,6 +6,7 @@ import datasets
 # HF imports
 import diffusers
 import numpy as np
+import pandas as pd
 
 # torch imports
 import torch
@@ -26,6 +27,7 @@ def main(
     dataset,
     img_dir,
     seg_dir,
+    img_name_filter,  # list with allowed image names for custom filtering (slices, indexes, min_amount of labels)
     model_type,
     segmentation_guided,
     segmentation_channel_mode,
@@ -41,6 +43,10 @@ def main(
     eval_blank_mask=False,
     eval_sample_size=1000,
 ):
+    # image name filter
+    if img_name_filter is not None:
+        img_name_filter = pd.read_csv(img_name_filter, header=None)[0].tolist()
+
     # GPUs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("running on {}".format(device))
@@ -180,6 +186,21 @@ def main(
                 for f in dset_dict_eval["seg_{}".format(seg_types[0])]
             ]
 
+        print(dset_dict_train.keys())
+
+        # filter dict entries for names in img_name_filter, keep if image_filename is in img_name_filter
+        if img_name_filter is not None:
+            dset_dict_train = pd.DataFrame(dset_dict_train)
+            dset_dict_train = dset_dict_train[
+                dset_dict_train["image_filename"].isin(img_name_filter)
+            ]
+            dset_dict_train = dset_dict_train.to_dict(orient="list")
+            dset_dict_eval = pd.DataFrame(dset_dict_eval)
+            dset_dict_eval = dset_dict_eval[
+                dset_dict_eval["image_filename"].isin(img_name_filter)
+            ]
+            dset_dict_eval = dset_dict_eval.to_dict(orient="list")
+
         dataset_train = datasets.Dataset.from_dict(dset_dict_train)
         dataset_eval = datasets.Dataset.from_dict(dset_dict_eval)
 
@@ -222,6 +243,19 @@ def main(
                 os.path.basename(f) for f in dset_dict_eval["image"]
             ]
 
+            # filter dict entries for names in img_name_filter, keep if image_filename is in img_name_filter
+            if img_name_filter is not None:
+                dset_dict_train = pd.DataFrame(dset_dict_train)
+                dset_dict_train = dset_dict_train[
+                    dset_dict_train["image_filename"].isin(img_name_filter)
+                ]
+                dset_dict_train = dset_dict_train.to_dict(orient="list")
+                dset_dict_eval = pd.DataFrame(dset_dict_eval)
+                dset_dict_eval = dset_dict_eval[
+                    dset_dict_eval["image_filename"].isin(img_name_filter)
+                ]
+                dset_dict_eval = dset_dict_eval.to_dict(orient="list")
+
             dataset_train = datasets.Dataset.from_dict(dset_dict_train)
             dataset_eval = datasets.Dataset.from_dict(dset_dict_eval)
 
@@ -234,7 +268,10 @@ def main(
     if not load_images_as_np_arrays:
         preprocess = transforms.Compose(
             [
-                transforms.Resize((config.image_size, config.image_size)),
+                # transforms.Pad(4),
+                # transforms.Resize(config.image_size),
+                transforms.RandomCrop((config.image_size, config.image_size)),
+                # add rotations??
                 # transforms.RandomHorizontalFlip(), # flipping wouldn't result in realistic images
                 transforms.ToTensor(),
                 transforms.Normalize(
@@ -488,6 +525,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="breast_mri")
     parser.add_argument("--img_dir", type=str, default=None)
     parser.add_argument("--seg_dir", type=str, default=None)
+    parser.add_argument("--img_name_filter", type=str, default=None)
     parser.add_argument("--model_type", type=str, default="DDPM")
     parser.add_argument(
         "--segmentation_guided",
@@ -557,6 +595,7 @@ if __name__ == "__main__":
         args.dataset,
         args.img_dir,
         args.seg_dir,
+        args.img_name_filter,
         args.model_type,
         args.segmentation_guided,
         args.segmentation_channel_mode,
