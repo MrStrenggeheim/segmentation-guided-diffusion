@@ -31,7 +31,7 @@ class TrainingConfig:
     eval_batch_size: int = 8  # how many images to sample during evaluation
     num_epochs: int = 200
     gradient_accumulation_steps: int = 1
-    learning_rate: float = 1e-4
+    learning_rate: float = 1e-5  # was 1e-4
     lr_warmup_steps: int = 500
     save_image_epochs: int = 1
     save_model_epochs: int = 1
@@ -231,6 +231,18 @@ def train_loop(
 
             progress_bar.set_postfix(**logs)
             global_step += 1
+
+            if global_step % 250 == 0:
+                pipeline = SegGuidedDDIMPipeline(
+                    unet=model.module,
+                    scheduler=noise_scheduler,
+                    eval_dataloader=eval_dataloader,
+                    external_config=config,
+                )
+                model.eval()
+                seg_batch = next(eval_dataloader)
+                evaluate(config, epoch, pipeline, seg_batch, step=global_step)
+                model.train()
 
         # After each epoch you optionally sample some demo images with evaluate() and save the model
         if config.model_type == "DDPM":

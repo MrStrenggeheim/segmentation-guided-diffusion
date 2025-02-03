@@ -18,19 +18,22 @@ from torchvision import transforms
 
 # custom imports
 from training import TrainingConfig, train_loop
+from utils.amos import AmosDataset
 
 
 def main(
-    mode,
-    img_size,
-    num_img_channels,
-    dataset,
+    mode,  # train val
+    img_size,  # used for transform
+    num_img_channels,  # 1, 3, or load as array
+    dataset,  # name
     img_dir,
     seg_dir,
     img_name_filter,  # list with allowed image names for custom filtering (slices, indexes, min_amount of labels)
-    model_type,
+    img_type,  # CT or MRI
+    index_range,
+    model_type,  # DDPM DDIM
     segmentation_guided,
-    segmentation_channel_mode,
+    segmentation_channel_mode,  # single or multi
     num_segmentation_classes,
     train_batch_size,
     eval_batch_size,
@@ -47,12 +50,20 @@ def main(
     if img_name_filter is not None:
         img_name_filter = pd.read_csv(img_name_filter, header=None)[0].tolist()
 
+    # set images to include
+    if img_type == "CT":
+        index_range = (0, 500)
+    elif img_type == "MRI":
+        index_range = (500, 600)
+    else:
+        index_range = index_range
+
     # GPUs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("running on {}".format(device))
 
     # load config
-    output_dir = "{}-{}-{}".format(
+    output_dir = "output/{}-{}-{}".format(
         model_type.lower(), dataset, img_size
     )  # the model namy locally and on the HF Hub
     if segmentation_guided:
@@ -94,201 +105,6 @@ def main(
         load_images_as_np_arrays = True
         print("image channels not 1 or 3, attempting to load images as np arrays...")
 
-    if config.segmentation_guided:
-        seg_types = os.listdir(seg_dir)
-        seg_paths_train = {}
-        seg_paths_eval = {}
-
-        # train set
-        if img_dir is not None:
-            # make sure the images are matched to the segmentation masks
-            img_dir_train = os.path.join(img_dir, "train")
-            img_paths_train = [
-                os.path.join(img_dir_train, f) for f in os.listdir(img_dir_train)
-            ]
-            for seg_type in seg_types:
-                seg_paths_train[seg_type] = [
-                    os.path.join(seg_dir, seg_type, "train", f)
-                    for f in os.listdir(img_dir_train)
-                ]
-        else:
-            for seg_type in seg_types:
-                seg_paths_train[seg_type] = [
-                    os.path.join(seg_dir, seg_type, "train", f)
-                    for f in os.listdir(os.path.join(seg_dir, seg_type, "train"))
-                ]
-
-        # eval set
-        if img_dir is not None:
-            img_dir_eval = os.path.join(img_dir, evalset_name)
-            img_paths_eval = [
-                os.path.join(img_dir_eval, f) for f in os.listdir(img_dir_eval)
-            ]
-            for seg_type in seg_types:
-                seg_paths_eval[seg_type] = [
-                    os.path.join(seg_dir, seg_type, evalset_name, f)
-                    for f in os.listdir(img_dir_eval)
-                ]
-        else:
-            for seg_type in seg_types:
-                seg_paths_eval[seg_type] = [
-                    os.path.join(seg_dir, seg_type, evalset_name, f)
-                    for f in os.listdir(os.path.join(seg_dir, seg_type, evalset_name))
-                ]
-
-        if img_dir is not None:
-            dset_dict_train = {
-                **{"image": img_paths_train},
-                **{
-                    "seg_{}".format(seg_type): seg_paths_train[seg_type]
-                    for seg_type in seg_types
-                },
-            }
-
-            dset_dict_eval = {
-                **{"image": img_paths_eval},
-                **{
-                    "seg_{}".format(seg_type): seg_paths_eval[seg_type]
-                    for seg_type in seg_types
-                },
-            }
-        else:
-            dset_dict_train = {
-                **{
-                    "seg_{}".format(seg_type): seg_paths_train[seg_type]
-                    for seg_type in seg_types
-                }
-            }
-
-            dset_dict_eval = {
-                **{
-                    "seg_{}".format(seg_type): seg_paths_eval[seg_type]
-                    for seg_type in seg_types
-                }
-            }
-
-        if img_dir is not None:
-            # add image filenames to dataset
-            dset_dict_train["image_filename"] = [
-                os.path.basename(f) for f in dset_dict_train["image"]
-            ]
-            dset_dict_eval["image_filename"] = [
-                os.path.basename(f) for f in dset_dict_eval["image"]
-            ]
-        else:
-            # use segmentation filenames as image filenames
-            dset_dict_train["image_filename"] = [
-                os.path.basename(f)
-                for f in dset_dict_train["seg_{}".format(seg_types[0])]
-            ]
-            dset_dict_eval["image_filename"] = [
-                os.path.basename(f)
-                for f in dset_dict_eval["seg_{}".format(seg_types[0])]
-            ]
-
-        print(dset_dict_train.keys())
-
-        # filter dict entries for names in img_name_filter, keep if image_filename is in img_name_filter
-        if img_name_filter is not None:
-            dset_dict_train = pd.DataFrame(dset_dict_train)
-            dset_dict_train = dset_dict_train[
-                dset_dict_train["image_filename"].isin(img_name_filter)
-            ]
-            dset_dict_train = dset_dict_train.to_dict(orient="list")
-            dset_dict_eval = pd.DataFrame(dset_dict_eval)
-            dset_dict_eval = dset_dict_eval[
-                dset_dict_eval["image_filename"].isin(img_name_filter)
-            ]
-            dset_dict_eval = dset_dict_eval.to_dict(orient="list")
-
-        dataset_train = datasets.Dataset.from_dict(dset_dict_train)
-        dataset_eval = datasets.Dataset.from_dict(dset_dict_eval)
-
-        # load the images
-        if not load_images_as_np_arrays and img_dir is not None:
-            dataset_train = dataset_train.cast_column("image", datasets.Image())
-            dataset_eval = dataset_eval.cast_column("image", datasets.Image())
-
-        for seg_type in seg_types:
-            dataset_train = dataset_train.cast_column(
-                "seg_{}".format(seg_type), datasets.Image()
-            )
-
-        for seg_type in seg_types:
-            dataset_eval = dataset_eval.cast_column(
-                "seg_{}".format(seg_type), datasets.Image()
-            )
-
-    else:
-        if img_dir is not None:
-            img_dir_train = os.path.join(img_dir, "train")
-            img_paths_train = [
-                os.path.join(img_dir_train, f) for f in os.listdir(img_dir_train)
-            ]
-
-            img_dir_eval = os.path.join(img_dir, evalset_name)
-            img_paths_eval = [
-                os.path.join(img_dir_eval, f) for f in os.listdir(img_dir_eval)
-            ]
-
-            dset_dict_train = {**{"image": img_paths_train}}
-
-            dset_dict_eval = {**{"image": img_paths_eval}}
-
-            # add image filenames to dataset
-            dset_dict_train["image_filename"] = [
-                os.path.basename(f) for f in dset_dict_train["image"]
-            ]
-            dset_dict_eval["image_filename"] = [
-                os.path.basename(f) for f in dset_dict_eval["image"]
-            ]
-
-            # filter dict entries for names in img_name_filter, keep if image_filename is in img_name_filter
-            if img_name_filter is not None:
-                dset_dict_train = pd.DataFrame(dset_dict_train)
-                dset_dict_train = dset_dict_train[
-                    dset_dict_train["image_filename"].isin(img_name_filter)
-                ]
-                dset_dict_train = dset_dict_train.to_dict(orient="list")
-                dset_dict_eval = pd.DataFrame(dset_dict_eval)
-                dset_dict_eval = dset_dict_eval[
-                    dset_dict_eval["image_filename"].isin(img_name_filter)
-                ]
-                dset_dict_eval = dset_dict_eval.to_dict(orient="list")
-
-            dataset_train = datasets.Dataset.from_dict(dset_dict_train)
-            dataset_eval = datasets.Dataset.from_dict(dset_dict_eval)
-
-            # load the images
-            if not load_images_as_np_arrays:
-                dataset_train = dataset_train.cast_column("image", datasets.Image())
-                dataset_eval = dataset_eval.cast_column("image", datasets.Image())
-
-    # training set preprocessing
-    if not load_images_as_np_arrays:
-        preprocess = transforms.Compose(
-            [
-                # transforms.Pad(4),
-                # transforms.Resize(config.image_size),
-                transforms.RandomCrop((config.image_size, config.image_size)),
-                # add rotations??
-                # transforms.RandomHorizontalFlip(), # flipping wouldn't result in realistic images
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    num_img_channels * [0.5], num_img_channels * [0.5]
-                ),
-            ]
-        )
-    else:
-        # resizing will be done in the transform function
-        preprocess = transforms.Compose(
-            [
-                transforms.Normalize(
-                    num_img_channels * [0.5], num_img_channels * [0.5]
-                ),
-            ]
-        )
-
     if num_img_channels == 1:
         PIL_image_type = "L"
     elif num_img_channels == 3:
@@ -296,82 +112,42 @@ def main(
     else:
         PIL_image_type = None
 
-    if config.segmentation_guided:
-        preprocess_segmentation = transforms.Compose(
+    dataset_train = AmosDataset(
+        img_dir,
+        seg_dir,
+        "train",
+        transform=transforms.Compose(
             [
-                transforms.Resize(
-                    (config.image_size, config.image_size),
-                    interpolation=transforms.InterpolationMode.NEAREST,
-                ),
                 transforms.ToTensor(),
+                # transforms.RandomRotation(10),
+                transforms.Resize(config.image_size),
+                transforms.CenterCrop(config.image_size),
+                transforms.Normalize(
+                    num_img_channels * [0.5], num_img_channels * [0.5]
+                ),
             ]
-        )
-
-        def transform(examples):
-            if img_dir is not None:
-                if not load_images_as_np_arrays:
-                    images = [
-                        preprocess(image.convert(PIL_image_type))
-                        for image in examples["image"]
-                    ]
-                else:
-                    # load np array as torch tensor, resize, then normalize
-                    images = [
-                        preprocess(
-                            F.interpolate(
-                                torch.tensor(np.load(image)).unsqueeze(0).float(),
-                                size=(config.image_size, config.image_size),
-                            ).squeeze()
-                        )
-                        for image in examples["image"]
-                    ]
-
-            images_filenames = examples["image_filename"]
-
-            segs = {}
-            for seg_type in seg_types:
-                segs["seg_{}".format(seg_type)] = [
-                    preprocess_segmentation(image.convert("L"))
-                    for image in examples["seg_{}".format(seg_type)]
-                ]
-            # return {"images": images, "seg_breast": seg_breast, "seg_dv": seg_dv}
-            if img_dir is not None:
-                return {
-                    **{"images": images},
-                    **segs,
-                    **{"image_filenames": images_filenames},
-                }
-            else:
-                return {**segs, **{"image_filenames": images_filenames}}
-
-        dataset_train.set_transform(transform)
-        dataset_eval.set_transform(transform)
-
-    else:
-        if img_dir is not None:
-
-            def transform(examples):
-                if not load_images_as_np_arrays:
-                    images = [
-                        preprocess(image.convert(PIL_image_type))
-                        for image in examples["image"]
-                    ]
-                else:
-                    images = [
-                        preprocess(
-                            F.interpolate(
-                                torch.tensor(np.load(image)).unsqueeze(0).float(),
-                                size=(config.image_size, config.image_size),
-                            ).squeeze()
-                        )
-                        for image in examples["image"]
-                    ]
-                images_filenames = examples["image_filename"]
-                # return {"images": images, "image_filenames": images_filenames}
-                return {"images": images, **{"image_filenames": images_filenames}}
-
-            dataset_train.set_transform(transform)
-            dataset_eval.set_transform(transform)
+        ),
+        index_range=(index_range[0], index_range[1]),
+        img_name_filter=img_name_filter,
+    )
+    dataset_eval = AmosDataset(
+        img_dir,
+        seg_dir,
+        "val",
+        transform=transforms.Compose(
+            [
+                transforms.ToTensor(),
+                # transforms.RandomRotation(10),
+                transforms.Resize(config.image_size),
+                transforms.CenterCrop(config.image_size),
+                transforms.Normalize(
+                    num_img_channels * [0.5], num_img_channels * [0.5]
+                ),
+            ]
+        ),
+        index_range=(index_range[0], index_range[1]),
+        img_name_filter=img_name_filter,
+    )
 
     if (img_dir is None) and (not segmentation_guided):
         train_dataloader = None
@@ -387,16 +163,21 @@ def main(
             ),
             batch_size=config.eval_batch_size,
             shuffle=eval_shuffle_dataloader,
+            num_workers=16,
         )
     else:
         train_dataloader = torch.utils.data.DataLoader(
-            dataset_train, batch_size=config.train_batch_size, shuffle=True
+            dataset_train,
+            batch_size=config.train_batch_size,
+            shuffle=True,
+            num_workers=16,
         )
 
         eval_dataloader = torch.utils.data.DataLoader(
             dataset_eval,
             batch_size=config.eval_batch_size,
             shuffle=eval_shuffle_dataloader,
+            num_workers=16,
         )
 
     # define the model
@@ -409,7 +190,7 @@ def main(
         if config.segmentation_channel_mode == "single":
             in_channels += 1
         elif config.segmentation_channel_mode == "multi":
-            in_channels = len(seg_types) + in_channels
+            raise NotImplementedError("multi-channel segmentation not implemented yet")
 
     model = diffusers.UNet2DModel(
         sample_size=config.image_size,  # the target image resolution

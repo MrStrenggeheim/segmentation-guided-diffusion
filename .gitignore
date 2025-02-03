@@ -1,3 +1,5 @@
 *.err
 *.out
 /runs
+__pycache__
+__init__.py

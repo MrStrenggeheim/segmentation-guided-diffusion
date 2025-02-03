@@ -3,6 +3,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
+import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
@@ -14,28 +15,49 @@ class AmosDataset(Dataset):
 
     def __init__(
         self,
-        path,
+        img_dir,
+        seg_dir,
         split: Literal["train", "val", "test"],
         transform=None,
         index_range=None,
         slice_range=None,
         only_labeled=False,
         # TODO file name mask
+        img_name_filter=None,
+        # TODO load_images_as_np_arrays or tensor with arbitrary shape
+        load_as_tensor=False,  # if True, load img and seg as tensor. expect .pt, using torch.load
     ):
-        folder_map = {
-            "train": "Tr",
-            "val": "Va",
-            "test": "Ts",
-        }
+        self.images_folder = os.path.join(img_dir, split)
+        self.labels_folder = os.path.join(seg_dir, split)
 
         print(f"Loading Amos {split} data")
-        self.images_folder = path + f"/images{folder_map[split]}/"
-        self.labels_folder = path + f"/labels{folder_map[split]}/"
 
         # TODO file name mask
 
-        images_df = pd.DataFrame(os.listdir(self.images_folder), columns=["image"])
-        labels_df = pd.DataFrame(os.listdir(self.labels_folder), columns=["label"])
+        # load images, do recursive search for all images in multiple folders
+        images_list = []
+        labels_list = []
+        for root, _, files in os.walk(self.images_folder, followlinks=True):
+            print("Including images from", os.path.relpath(root, self.images_folder))
+            for file in files:
+                images_list.append(
+                    os.path.join(os.path.relpath(root, self.images_folder), file)
+                )
+        for root, _, files in os.walk(self.labels_folder, followlinks=True):
+            print("Including labels from", os.path.relpath(root, self.labels_folder))
+            for file in files:
+                labels_list.append(
+                    os.path.join(os.path.relpath(root, self.labels_folder), file)
+                )
+
+        # Assume that the images and labels are named the same
+        # items_list = list(set(images_list).intersection(set(labels_list)))
+        images_df = pd.DataFrame(images_list, columns=["image"])
+        labels_df = pd.DataFrame(labels_list, columns=["label"])
+        print(f"{len(images_df)} images and {len(labels_df)} labels")
+        images_df = images_df[images_df["image"].isin(labels_df["label"])]
+        labels_df = labels_df[labels_df["label"].isin(images_df["image"])]
+        print(f"{len(images_df)} images and {len(labels_df)} labels after intersection")
 
         # filter image not in range
         if index_range:
@@ -46,6 +68,7 @@ class AmosDataset(Dataset):
             )
         else:
             index_mask = [True] * len(images_df)
+        # filter slice not in range
         if slice_range:
             assert len(slice_range) == 2, "slice_range must be a list of two integers"
             slice_range = range(slice_range[0], slice_range[1] + 1)
@@ -59,7 +82,7 @@ class AmosDataset(Dataset):
         images_df = images_df[combined_mask]
         labels_df = labels_df[combined_mask]
 
-        # filter if not at least one pixel is labeled
+        # filter if not at least one pixel is labeled. NOT RECOMMENDED
         if only_labeled:
             print(f"Filtering only labeled images ...")
             label_mask = labels_df["label"].apply(
@@ -68,12 +91,20 @@ class AmosDataset(Dataset):
             images_df = images_df[label_mask]
             labels_df = labels_df[label_mask]
 
+        print(f"{len(images_df)} images and {len(labels_df)} labels after masking")
+
         assert len(images_df) == len(
             labels_df
         ), "Number of images and labels do not match"
 
         self.dataset = pd.merge(images_df, labels_df, left_on="image", right_on="label")
+        self.load_as_tensor = load_as_tensor
         self.transform = transform
+
+        if img_name_filter is not None:
+            self.dataset = self.dataset[
+                self.dataset["image"].isin(img_name_filter)
+            ].reset_index(drop=True)
 
         print(f"Loaded {len(self.dataset)} {split} images")
         print(
@@ -101,14 +132,28 @@ class AmosDataset(Dataset):
         """
         Returns the image and label at the given index.
         """
-        img = Image.open(self.images_folder + self.dataset["image"][index])
-        label = Image.open(self.labels_folder + self.dataset["label"][index])
+
+        # if load np
+        # F.interpolate(
+        #                         torch.tensor(np.load(image)).unsqueeze(0).float(),
+        #                         size=(config.image_size, config.image_size),
+        #                     ).squeeze()
+
+        img_path = os.path.join(self.images_folder, self.dataset["image"][index])
+        seg_path = os.path.join(self.labels_folder, self.dataset["label"][index])
+
+        if self.load_as_tensor:
+            img = torch.load(img_path)
+            label = torch.load(seg_path)
+        else:
+            img = Image.open(img_path)
+            label = Image.open(seg_path)
 
         if self.transform:
             img = self.transform(img)
             label = self.transform(label)
 
-        return img, label
+        return {"images": img, "images_target": label}
 
     def __len__(self):
         return len(self.dataset)

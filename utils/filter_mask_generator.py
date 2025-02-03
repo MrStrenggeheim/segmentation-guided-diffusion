@@ -13,7 +13,7 @@ IDX_RANGE = range(0, 500)  # filter for MRI
 SLC_RANGE = range(0, 1000)  # should include all
 
 MIN_PXL_MASK = None  # n pixels not to be background
-MIN_SEG_CLS = 2  # min number of unique seg classes, including background
+MIN_SEG_CLS = None  # min number of unique seg classes, including background
 
 
 def filter_name(filename, path, is_mask=True):
