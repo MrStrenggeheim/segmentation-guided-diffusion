@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
+from torchvision import transforms as tt
 
 
 class AmosDataset(Dataset):
@@ -18,21 +19,21 @@ class AmosDataset(Dataset):
         img_dir,
         seg_dir,
         split: Literal["train", "val", "test"],
-        transform=None,
+        num_img_channels,  # expect 1 or 3
+        img_size,
+        transforms,
         index_range=None,
         slice_range=None,
         only_labeled=False,
-        # TODO file name mask
         img_name_filter=None,
-        # TODO load_images_as_np_arrays or tensor with arbitrary shape
-        load_as_tensor=False,  # if True, load img and seg as tensor. expect .pt, using torch.load
+        load_images_as_np_arrays=False,  # if True, load img and seg as tensor. expect .pt, using torch.load
     ):
         self.images_folder = os.path.join(img_dir, split)
         self.labels_folder = os.path.join(seg_dir, split)
 
         print(f"Loading Amos {split} data")
-
-        # TODO file name mask
+        print(f"Images folder: {self.images_folder}")
+        print(f"Labels folder: {self.labels_folder}")
 
         # load images, do recursive search for all images in multiple folders
         images_list = []
@@ -49,14 +50,15 @@ class AmosDataset(Dataset):
                 labels_list.append(
                     os.path.join(os.path.relpath(root, self.labels_folder), file)
                 )
-
+        images_list = sorted(images_list)
+        labels_list = sorted(labels_list)
         # Assume that the images and labels are named the same
         # items_list = list(set(images_list).intersection(set(labels_list)))
         images_df = pd.DataFrame(images_list, columns=["image"])
         labels_df = pd.DataFrame(labels_list, columns=["label"])
         print(f"{len(images_df)} images and {len(labels_df)} labels")
-        images_df = images_df[images_df["image"].isin(labels_df["label"])]
-        labels_df = labels_df[labels_df["label"].isin(images_df["image"])]
+        images_df = images_df[images_df["image"].isin(labels_df["label"])].reset_index()
+        labels_df = labels_df[labels_df["label"].isin(images_df["image"])].reset_index()
         print(f"{len(images_df)} images and {len(labels_df)} labels after intersection")
 
         # filter image not in range
@@ -97,18 +99,63 @@ class AmosDataset(Dataset):
             labels_df
         ), "Number of images and labels do not match"
 
+        print(images_df)
+        print(labels_df)
+
+        print(
+            f"{len(set(images_df["image"]).intersection(set(labels_df["label"])))} images and labels after intersection"
+        )
         self.dataset = pd.merge(images_df, labels_df, left_on="image", right_on="label")
-        self.load_as_tensor = load_as_tensor
-        self.transform = transform
 
         if img_name_filter is not None:
+            print(f"Filtering images by name ...")
             self.dataset = self.dataset[
                 self.dataset["image"].isin(img_name_filter)
             ].reset_index(drop=True)
 
         print(f"Loaded {len(self.dataset)} {split} images")
+
+        self.load_images_as_np_arrays = load_images_as_np_arrays
+        self.num_img_channels = num_img_channels
+        self.img_size = img_size
+
+        self.transform_img = []
+        self.transform_seg = []
+        transforms = "" if transforms is None else transforms
+        parsed_transforms = eval(transforms)
+        print(f"Parsed Transforms: {parsed_transforms}")
+
+        for t in parsed_transforms:
+            if t == "ToTensor":
+                self.transform_img.append(tt.ToTensor())
+                self.transform_seg.append(tt.ToTensor())
+            elif t == "Resize":
+                self.transform_img.append(tt.Resize(img_size))
+                self.transform_seg.append(tt.Resize(img_size))
+            elif t == "CenterCrop":
+                self.transform_img.append(tt.CenterCrop(img_size))
+                self.transform_seg.append(tt.CenterCrop(img_size))
+            elif t == "ColorJitter":
+                self.transform_img.append(
+                    tt.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1)
+                )
+            elif t == "Normalize":
+                self.transform_img.append(
+                    tt.Normalize(num_img_channels * [0.5], num_img_channels * [0.5])
+                )
+                self.transform_seg.append(
+                    tt.Normalize(num_img_channels * [0.5], num_img_channels * [0.5])
+                )
+
+        self.transform_img = tt.Compose(self.transform_img)
+        self.transform_seg = tt.Compose(self.transform_seg)
         print(
-            f"Transforms: {transform}, index_range: {index_range}, slice_range: {slice_range}, only_labeled: {only_labeled}"
+            f"""
+            Transform img: {self.transform_img},
+            Transform seg: {self.transform_seg},
+            index_range: {index_range}, 
+            slice_range: {slice_range}, 
+            only_labeled: {only_labeled}"""
         )
 
     def _filter_filename(self, filename, range, filter_type="index"):
@@ -132,26 +179,20 @@ class AmosDataset(Dataset):
         """
         Returns the image and label at the given index.
         """
-
-        # if load np
-        # F.interpolate(
-        #                         torch.tensor(np.load(image)).unsqueeze(0).float(),
-        #                         size=(config.image_size, config.image_size),
-        #                     ).squeeze()
-
         img_path = os.path.join(self.images_folder, self.dataset["image"][index])
         seg_path = os.path.join(self.labels_folder, self.dataset["label"][index])
 
-        if self.load_as_tensor:
+        if self.load_images_as_np_arrays:
             img = torch.load(img_path)
             label = torch.load(seg_path)
         else:
             img = Image.open(img_path)
             label = Image.open(seg_path)
 
-        if self.transform:
-            img = self.transform(img)
-            label = self.transform(label)
+        if self.transform_img:
+            img = self.transform_img(img)
+        if self.transform_seg:
+            label = self.transform_seg(label)
 
         return {"images": img, "images_target": label}
 

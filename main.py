@@ -14,7 +14,6 @@ import torch.nn.functional as F
 from diffusers.optimization import get_cosine_schedule_with_warmup
 from eval import evaluate_generation, evaluate_sample_many
 from torch import nn
-from torchvision import transforms
 
 # custom imports
 from training import TrainingConfig, train_loop
@@ -25,6 +24,7 @@ def main(
     mode,  # train val
     img_size,  # used for transform
     num_img_channels,  # 1, 3, or load as array
+    load_images_as_np_arrays,  # if True, load img and seg as tensor. expect .pt, using torch.load
     dataset,  # name
     img_dir,
     seg_dir,
@@ -32,13 +32,15 @@ def main(
     img_type,  # CT or MRI
     index_range,
     model_type,  # DDPM DDIM
+    transforms,
     segmentation_guided,
+    segmentation_ingestion_mode,  # concat, add, mul, replace
     segmentation_channel_mode,  # single or multi
     num_segmentation_classes,
     train_batch_size,
     eval_batch_size,
-    num_epochs,
-    resume_epoch=None,
+    num_epochs=50,
+    resume=False,
     use_ablated_segmentations=False,
     eval_shuffle_dataloader=True,
     # arguments only used in eval
@@ -63,8 +65,12 @@ def main(
     print("running on {}".format(device))
 
     # load config
-    output_dir = "output/{}-{}-{}".format(
-        model_type.lower(), dataset, img_size
+    output_dir = "output/{}-{}-{}-{}-{}".format(
+        model_type.lower(),
+        dataset,
+        img_size,
+        num_img_channels,
+        segmentation_ingestion_mode,
     )  # the model namy locally and on the HF Hub
     if segmentation_guided:
         output_dir += "-segguided"
@@ -89,6 +95,7 @@ def main(
         image_size=img_size,
         dataset=dataset,
         segmentation_guided=segmentation_guided,
+        segmentation_ingestion_mode=segmentation_ingestion_mode,
         segmentation_channel_mode=segmentation_channel_mode,
         num_segmentation_classes=num_segmentation_classes,
         train_batch_size=train_batch_size,
@@ -96,57 +103,31 @@ def main(
         num_epochs=num_epochs,
         output_dir=output_dir,
         model_type=model_type,
-        resume_epoch=resume_epoch,
+        resume=resume,
         use_ablated_segmentations=use_ablated_segmentations,
     )
-
-    load_images_as_np_arrays = False
-    if num_img_channels not in [1, 3]:
-        load_images_as_np_arrays = True
-        print("image channels not 1 or 3, attempting to load images as np arrays...")
-
-    if num_img_channels == 1:
-        PIL_image_type = "L"
-    elif num_img_channels == 3:
-        PIL_image_type = "RGB"
-    else:
-        PIL_image_type = None
 
     dataset_train = AmosDataset(
         img_dir,
         seg_dir,
         "train",
-        transform=transforms.Compose(
-            [
-                transforms.ToTensor(),
-                # transforms.RandomRotation(10),
-                transforms.Resize(config.image_size),
-                transforms.CenterCrop(config.image_size),
-                transforms.Normalize(
-                    num_img_channels * [0.5], num_img_channels * [0.5]
-                ),
-            ]
-        ),
-        index_range=(index_range[0], index_range[1]),
+        num_img_channels=num_img_channels,
+        img_size=img_size,
+        transforms=transforms,
+        index_range=index_range,
         img_name_filter=img_name_filter,
+        load_images_as_np_arrays=load_images_as_np_arrays,
     )
     dataset_eval = AmosDataset(
         img_dir,
         seg_dir,
         "val",
-        transform=transforms.Compose(
-            [
-                transforms.ToTensor(),
-                # transforms.RandomRotation(10),
-                transforms.Resize(config.image_size),
-                transforms.CenterCrop(config.image_size),
-                transforms.Normalize(
-                    num_img_channels * [0.5], num_img_channels * [0.5]
-                ),
-            ]
-        ),
-        index_range=(index_range[0], index_range[1]),
+        num_img_channels=num_img_channels,
+        img_size=img_size,
+        transforms=transforms,
+        index_range=index_range,
         img_name_filter=img_name_filter,
+        load_images_as_np_arrays=load_images_as_np_arrays,
     )
 
     if (img_dir is None) and (not segmentation_guided):
@@ -188,10 +169,10 @@ def main(
             config.num_segmentation_classes > 1
         ), "must have at least 2 segmentation classes (INCLUDING background)"
         if config.segmentation_channel_mode == "single":
-            in_channels += 1
+            if segmentation_ingestion_mode == "concat":
+                in_channels += 1
         elif config.segmentation_channel_mode == "multi":
             raise NotImplementedError("multi-channel segmentation not implemented yet")
-
     model = diffusers.UNet2DModel(
         sample_size=config.image_size,  # the target image resolution
         in_channels=in_channels,  # the number of input channels, 3 for RGB images
@@ -223,14 +204,31 @@ def main(
         ),
     )
 
-    if (mode == "train" and resume_epoch is not None) or "eval" in mode:
-        if mode == "train":
-            print("resuming from model at training epoch {}".format(resume_epoch))
-        elif "eval" in mode:
-            print("loading saved model...")
-        model = model.from_pretrained(
-            os.path.join(config.output_dir, "unet"), use_safetensors=True
-        )
+    if (mode == "train" and resume) or "eval" in mode:
+        if os.path.exists(config.output_dir):
+            epoch_folders = [f for f in os.listdir(config.output_dir) if "epoch" in f]
+            if len(epoch_folders) > 0:
+                last_ckpt_folder = sorted(epoch_folders)[-1]
+                config.start_epoch = int(last_ckpt_folder.split("_")[-1]) + 1
+                if mode == "train":
+                    print(
+                        "resuming from last model from folder: {}".format(
+                            last_ckpt_folder
+                        )
+                    )
+                elif "eval" in mode:
+                    print(
+                        "loading saved model from folder: {}".format(last_ckpt_folder)
+                    )
+
+                model = model.from_pretrained(
+                    os.path.join(config.output_dir, last_ckpt_folder, "unet"),
+                    use_safetensors=True,
+                )
+            else:
+                print(f"no saved model found in {config.output_dir}")
+        else:
+            print(f"folder not found: {config.output_dir}")
 
     model = nn.DataParallel(model)
     model.to(device)
@@ -303,15 +301,25 @@ if __name__ == "__main__":
     parser.add_argument("--mode", type=str, default="train")
     parser.add_argument("--img_size", type=int, default=256)
     parser.add_argument("--num_img_channels", type=int, default=1)
+    parser.add_argument("--load_images_as_np_arrays", action="store_true")
     parser.add_argument("--dataset", type=str, default="breast_mri")
     parser.add_argument("--img_dir", type=str, default=None)
     parser.add_argument("--seg_dir", type=str, default=None)
     parser.add_argument("--img_name_filter", type=str, default=None)
+    parser.add_argument("--img_type", type=str, default=None)
+    parser.add_argument("--index_range", type=int, nargs=2, default=None)
     parser.add_argument("--model_type", type=str, default="DDPM")
+    parser.add_argument("--transforms", type=str, default=None)
     parser.add_argument(
         "--segmentation_guided",
         action="store_true",
         help="use segmentation guided training/sampling?",
+    )
+    parser.add_argument(
+        "--segmentation_ingestion_mode",
+        type=str,
+        default="concat",
+        help="concat, add, mul, replace",
     )
     parser.add_argument(
         "--segmentation_channel_mode",
@@ -329,10 +337,9 @@ if __name__ == "__main__":
     parser.add_argument("--eval_batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=200)
     parser.add_argument(
-        "--resume_epoch",
-        type=int,
-        default=None,
-        help="resume training starting at this epoch",
+        "--resume",
+        action="store_true",
+        help="resume training from last saved model",
     )
 
     # novel options
@@ -373,18 +380,23 @@ if __name__ == "__main__":
         args.mode,
         args.img_size,
         args.num_img_channels,
+        args.load_images_as_np_arrays,
         args.dataset,
         args.img_dir,
         args.seg_dir,
         args.img_name_filter,
+        args.img_type,
+        args.index_range,
         args.model_type,
+        args.transforms,
         args.segmentation_guided,
+        args.segmentation_ingestion_mode,
         args.segmentation_channel_mode,
         args.num_segmentation_classes,
         args.train_batch_size,
         args.eval_batch_size,
         args.num_epochs,
-        args.resume_epoch,
+        args.resume,
         args.use_ablated_segmentations,
         not args.eval_noshuffle_dataloader,
         # args only used in eval
