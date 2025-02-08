@@ -18,7 +18,8 @@ ml python/anaconda3
 source deactivate
 source activate py312
 
-python3 main.py --mode train \
+python3 main.py \
+    --mode train \
     --img_size 128 \
     --num_img_channels 1 \
     --dataset amos_ct_all_axis \

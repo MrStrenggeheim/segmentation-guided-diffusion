@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=test-seg-guided-diff-exp
+#SBATCH --job-name=sgd-amos_both_base
 #SBATCH --mail-user=florian.hunecke@tum.de
 #SBATCH --mail-type=ALL
-#SBATCH --output=logs/amos_mri_both.out
-#SBATCH --error=logs/amos_mri_both.err
+#SBATCH --output=logs/amos_both_base.out
+#SBATCH --error=logs/amos_both_base.err
 #SBATCH --time=7-00:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
@@ -21,11 +21,10 @@ python main.py \
     --mode train \
     --img_size 256 \
     --num_img_channels 1 \
-    --dataset amos_mri_both \
+    --dataset amos_both_base \
     --img_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/images \
     --seg_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/labels \
     --model_type DDIM \
-    --img_type MRI \
     --segmentation_guided \
     --segmentation_ingestion_mode concat \
     --segmentation_channel_mode single \
@@ -35,6 +34,7 @@ python main.py \
     --num_epochs 100 \
     --transforms "['ToTensor', 'Resize', 'CenterCrop', 'Normalize']" \
     --resume \
+    # --img_type MRI \
     # --lr 0.0001 \
     # --index_range 0 200 \
     # --model_type DDIM \

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=test-seg-guided-diff-exp
+#SBATCH --job-name=sgd-amos_ct_all_axis
 #SBATCH --mail-user=florian.hunecke@tum.de
 #SBATCH --mail-type=ALL
 #SBATCH --output=logs/amos_ct_all_axis.out

@@ -34,8 +34,9 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
     learning_rate: float = 1e-5  # was 1e-4
     lr_warmup_steps: int = 500
-    save_image_epochs: int = 1
-    save_model_epochs: int = 1
+    save_model_epochs: int | float = (
+        0.25  # save model every n epochs or every n% of total epochs
+    )
     mixed_precision: str = (
         "fp16"  # `no` for float32, `fp16` for automatic mixed precision
     )
@@ -152,72 +153,67 @@ def train_loop(
             progress_bar.set_postfix(**logs)
             global_step += 1
 
-            # if global_step % 250 == 0:
-            #     pipeline = SegGuidedDDIMPipeline(
-            #         unet=model.module,
-            #         scheduler=noise_scheduler,
-            #         eval_dataloader=eval_dataloader,
-            #         external_config=config,
-            #     )
-            #     model.eval()
-            #     seg_batch = next(eval_dataloader)
-            #     evaluate(config, epoch, pipeline, seg_batch, step=global_step)
-            #     model.train()
+            if (
+                isinstance(config.save_model_epochs, float)
+                and (step + 1) % (len(train_dataloader) * config.save_model_epochs) == 0
+            ):
+                eval_and_save(
+                    config, model, noise_scheduler, eval_dataloader, epoch, step
+                )
 
         # After each epoch you optionally sample some demo images with evaluate() and save the model
-        if config.model_type == "DDPM":
-            if config.segmentation_guided:
-                pipeline = SegGuidedDDPMPipeline(
-                    unet=model.module,
-                    scheduler=noise_scheduler,
-                    eval_dataloader=eval_dataloader,
-                    external_config=config,
-                )
-            else:
-                pipeline = diffusers.DDPMPipeline(
-                    unet=model.module, scheduler=noise_scheduler
-                )
-        elif config.model_type == "DDIM":
-            if config.segmentation_guided:
-                pipeline = SegGuidedDDIMPipeline(
-                    unet=model.module,
-                    scheduler=noise_scheduler,
-                    eval_dataloader=eval_dataloader,
-                    external_config=config,
-                )
-            else:
-                pipeline = diffusers.DDIMPipeline(
-                    unet=model.module, scheduler=noise_scheduler
-                )
-
-        model.eval()
-
         if (
-            epoch + 1
-        ) % config.save_image_epochs == 0 or epoch == config.num_epochs - 1:
-            if config.segmentation_guided:
-                seg_batch = next(eval_dataloader)
-                evaluate(config, epoch, pipeline, seg_batch)
-            else:
-                evaluate(config, epoch, pipeline)
+            isinstance(config.save_model_epochs, int)
+            and (epoch + 1) % config.save_model_epochs == 0
+            or epoch == config.num_epochs - 1
+        ):
+            eval_and_save(config, model, noise_scheduler, eval_dataloader, epoch, step)
 
-        if (
-            epoch + 1
-        ) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
-            # exclude non serializable objects
-            del pipeline.config.eval_dataloader
-            del pipeline.config.external_config
 
-            pipeline.save_pretrained(
-                os.path.join(config.output_dir, f"epoch_{epoch:04d}"),
-                safe_serialization=True,
+def eval_and_save(config, model, noise_scheduler, eval_dataloader, epoch, step):
+    if config.model_type == "DDPM":
+        if config.segmentation_guided:
+            pipeline = SegGuidedDDPMPipeline(
+                unet=model.module,
+                scheduler=noise_scheduler,
+                eval_dataloader=eval_dataloader,
+                external_config=config,
             )
-            # save only last 3
-            ckpt_list = sorted(
-                [f for f in os.listdir(config.output_dir) if "epoch" in f]
+        else:
+            pipeline = diffusers.DDPMPipeline(
+                unet=model.module, scheduler=noise_scheduler
             )
-            if len(ckpt_list) > 3:
-                for ckpt in ckpt_list[:-3]:
-                    shutil.rmtree(
-                        os.path.join(config.output_dir, ckpt), ignore_errors=True
-                    )
+    elif config.model_type == "DDIM":
+        if config.segmentation_guided:
+            pipeline = SegGuidedDDIMPipeline(
+                unet=model.module,
+                scheduler=noise_scheduler,
+                eval_dataloader=eval_dataloader,
+                external_config=config,
+            )
+        else:
+            pipeline = diffusers.DDIMPipeline(
+                unet=model.module, scheduler=noise_scheduler
+            )
+
+    model.eval()
+
+    if config.segmentation_guided:
+        seg_batch = next(eval_dataloader)
+        evaluate(config, epoch, pipeline, seg_batch, step=step)
+    else:
+        evaluate(config, epoch, pipeline, step=step)
+
+    # exclude non serializable objects
+    del pipeline.config.eval_dataloader
+    del pipeline.config.external_config
+
+    pipeline.save_pretrained(
+        os.path.join(config.output_dir, f"epoch_{epoch:04d}_{step:04d}"),
+        safe_serialization=True,
+    )
+    # save only last 3
+    ckpt_list = sorted([f for f in os.listdir(config.output_dir) if "epoch" in f])
+    if len(ckpt_list) > 3:
+        for ckpt in ckpt_list[:-3]:
+            shutil.rmtree(os.path.join(config.output_dir, ckpt), ignore_errors=True)

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=test-seg-guided-diff-exp
+#SBATCH --job-name=sgd-amos_mri_base
 #SBATCH --mail-user=florian.hunecke@tum.de
 #SBATCH --mail-type=ALL
 #SBATCH --output=logs/amos_mri_base.out
