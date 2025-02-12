@@ -73,7 +73,7 @@ def evaluate_sample_many(
                     v for k, v in seg_batch.items() if k.startswith("seg_")
                 ][0].shape[0]
             else:
-                current_batch_size = config.eval_batch_size
+                current_batch_size = config.batch_size
 
             if config.segmentation_guided:
                 images = pipeline(
@@ -172,7 +172,7 @@ def evaluate_generation(
 
         # visualize segmentation-guided sampling by seeing what happens
         # when segs removed
-        num_viz = config.eval_batch_size
+        num_viz = config.batch_size
 
         # choose one seg to sample from; duplicate it
         eval_same_image = False
@@ -183,7 +183,7 @@ def evaluate_generation(
         multiclass_masks = []
         result_imgs = []
         multiclass_masks_shape = (
-            config.eval_batch_size,
+            config.batch_size,
             1,
             config.image_size,
             config.image_size,
@@ -250,7 +250,7 @@ def evaluate_generation(
                 )
                 # add images conditioned on some segs but not all
                 removed_seg_imgs = pipeline(
-                    batch_size=config.eval_batch_size,
+                    batch_size=config.batch_size,
                     seg_batch=seg_batch_removed,
                     class_label_cfg=class_label_cfg,
                     translate=translate,
@@ -293,7 +293,7 @@ def evaluate_generation(
                             )
                             # add images conditioned on some segs but not all
                             removed_seg_imgs = pipeline(
-                                batch_size=config.eval_batch_size,
+                                batch_size=config.batch_size,
                                 seg_batch=seg_batch_removed,
                                 class_label_cfg=class_label_cfg,
                                 translate=translate,
@@ -415,18 +415,14 @@ def add_segmentations_to_noise(noisy_images, batch, config, device):
     concat segmentations to noisy image
     """
     segs = batch["images_target"].to(device)
-    if config.segmentation_channel_mode == "single":
-        if config.segmentation_ingestion_mode == "concat":
-            noisy_images = torch.cat((noisy_images, segs), dim=1)
-        elif config.segmentation_ingestion_mode == "add":
-            noisy_images = torch.add(noisy_images, segs)
-            noisy_images = torch.nn.functional.normalize(noisy_images)
-        elif config.segmentation_ingestion_mode == "mul":
-            noisy_images = torch.mul(noisy_images, segs)
-            noisy_images = torch.nn.functional.normalize(noisy_images)
-
-    elif config.segmentation_channel_mode == "multi":
-        raise NotImplementedError
+    if config.segmentation_ingestion_mode == "concat":
+        noisy_images = torch.cat((noisy_images, segs), dim=1)
+    elif config.segmentation_ingestion_mode == "add":
+        noisy_images = torch.add(noisy_images, segs)
+        noisy_images = torch.nn.functional.normalize(noisy_images)
+    elif config.segmentation_ingestion_mode == "mul":
+        noisy_images = torch.mul(noisy_images, segs)
+        noisy_images = torch.nn.functional.normalize(noisy_images)
 
     return noisy_images
 
@@ -450,14 +446,14 @@ def evaluate(
     if config.segmentation_guided:
         # TODO implement if not concat
         images = pipeline(
-            batch_size=config.eval_batch_size,
+            batch_size=config.batch_size,
             seg_batch=seg_batch,
             class_label_cfg=class_label_cfg,
             translate=translate,
         ).images
     else:
         images = pipeline(
-            batch_size=config.eval_batch_size,
+            batch_size=config.batch_size,
             # TODO: implement CFG and naive conditioning sampling for non-seg-guided pipelines (also needed for translation)
         ).images
 
@@ -564,12 +560,7 @@ class SegGuidedDDPMPipeline(DiffusionPipeline):
         """
         # Sample gaussian noise to begin loop
         if self.external_config.segmentation_ingestion_mode == "concat":
-            if self.external_config.segmentation_channel_mode == "single":
-                img_channel_ct = self.unet.config.in_channels - 1
-            elif self.external_config.segmentation_channel_mode == "multi":
-                img_channel_ct = self.unet.config.in_channels - len(
-                    [k for k in seg_batch.keys() if k.startswith("seg_")]
-                )
+            img_channel_ct = self.unet.config.in_channels - 1
         else:
             img_channel_ct = self.unet.config.in_channels
 
@@ -751,12 +742,7 @@ class SegGuidedDDIMPipeline(DiffusionPipeline):
 
         # Sample gaussian noise to begin loop
         if self.external_config.segmentation_ingestion_mode == "concat":
-            if self.external_config.segmentation_channel_mode == "single":
-                img_channel_ct = self.unet.config.in_channels - 1
-            elif self.external_config.segmentation_channel_mode == "multi":
-                img_channel_ct = self.unet.config.in_channels - len(
-                    [k for k in seg_batch.keys() if k.startswith("seg_")]
-                )
+            img_channel_ct = self.unet.config.in_channels - 1
         else:
             img_channel_ct = self.unet.config.in_channels
 
