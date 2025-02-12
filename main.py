@@ -1,7 +1,6 @@
 import os
+import sys
 from argparse import ArgumentParser
-
-import datasets
 
 # HF imports
 import diffusers
@@ -15,9 +14,11 @@ from diffusers.optimization import get_cosine_schedule_with_warmup
 from eval import evaluate_generation, evaluate_sample_many
 from torch import nn
 
-# custom imports
+# cutom imports from ../utils
+sys.path.append("..")
 from training import TrainingConfig, train_loop
-from utils.amos import AmosDataset
+
+from utils.dataset.amos import AmosDataset
 
 
 def main(
@@ -203,6 +204,8 @@ def main(
             "UpBlock2D",
         ),
     )
+
+    print(dataset_eval[0]["images"].shape)
 
     if (mode == "train" and resume) or "eval" in mode:
         if os.path.exists(config.output_dir):
