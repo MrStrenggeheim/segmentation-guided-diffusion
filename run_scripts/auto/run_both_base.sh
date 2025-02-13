@@ -9,7 +9,7 @@
 #SBATCH --mem=16G
 #SBATCH --gres=gpu:1
 # make sure to not get interrupted
-SBATCH --qos=master-queuesave
+##SBATCH --qos=master-queuesave
 ##SBATCH --partition=universe,asteroids
 
 ml python/anaconda3
