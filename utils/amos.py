@@ -9,6 +9,46 @@ from torch.utils.data import Dataset
 from torchvision import transforms as tt
 
 
+def parse_transforms(transforms, num_img_channels, img_size):
+    transform_img = []
+    transform_seg = []
+    transform_raw = []
+    transforms = "" if transforms is None else transforms
+    parsed_transforms = eval(transforms)
+    print(f"Parsed Transforms: {parsed_transforms}")
+
+    for t in parsed_transforms:
+        if t == "ToTensor":
+            transform_img.append(tt.ToTensor())
+            transform_seg.append(tt.ToTensor())
+            transform_raw.append(tt.ToTensor())
+        elif t == "Resize":
+            transform_img.append(tt.Resize(img_size))
+            transform_seg.append(tt.Resize(img_size))
+            transform_raw.append(tt.Resize(img_size, interpolation=Image.NEAREST))
+        elif t == "CenterCrop":
+            transform_img.append(tt.CenterCrop(img_size))
+            transform_seg.append(tt.CenterCrop(img_size))
+            transform_raw.append(tt.CenterCrop(img_size))
+        elif t == "ColorJitter":
+            transform_img.append(
+                tt.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1)
+            )
+        elif t == "Normalize":
+            transform_img.append(
+                tt.Normalize(num_img_channels * [0.5], num_img_channels * [0.5])
+            )
+            transform_seg.append(
+                tt.Normalize(num_img_channels * [0.5], num_img_channels * [0.5])
+            )
+
+    return (
+        tt.Compose(transform_img),
+        tt.Compose(transform_seg),
+        tt.Compose(transform_raw),
+    )
+
+
 class AmosDataset(Dataset):
     """
     Amos dataset class for PyTorch.
@@ -28,6 +68,7 @@ class AmosDataset(Dataset):
         img_name_filter=None,
         load_images_as_np_arrays=False,  # if True, load img and seg as tensor. expect .pt, using torch.load
     ):
+        self.split = split
         self.images_folder = os.path.join(img_dir, split)
         self.labels_folder = os.path.join(seg_dir, split)
 
@@ -99,9 +140,6 @@ class AmosDataset(Dataset):
             labels_df
         ), "Number of images and labels do not match"
 
-        print(images_df)
-        print(labels_df)
-
         print(
             f"{len(set(images_df["image"]).intersection(set(labels_df["label"])))} images and labels after intersection"
         )
@@ -119,36 +157,10 @@ class AmosDataset(Dataset):
         self.num_img_channels = num_img_channels
         self.img_size = img_size
 
-        self.transform_img = []
-        self.transform_seg = []
-        transforms = "" if transforms is None else transforms
-        parsed_transforms = eval(transforms)
-        print(f"Parsed Transforms: {parsed_transforms}")
+        self.transform_img, self.transform_seg, self.transform_raw = parse_transforms(
+            transforms, num_img_channels, img_size
+        )
 
-        for t in parsed_transforms:
-            if t == "ToTensor":
-                self.transform_img.append(tt.ToTensor())
-                self.transform_seg.append(tt.ToTensor())
-            elif t == "Resize":
-                self.transform_img.append(tt.Resize(img_size))
-                self.transform_seg.append(tt.Resize(img_size))
-            elif t == "CenterCrop":
-                self.transform_img.append(tt.CenterCrop(img_size))
-                self.transform_seg.append(tt.CenterCrop(img_size))
-            elif t == "ColorJitter":
-                self.transform_img.append(
-                    tt.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1)
-                )
-            elif t == "Normalize":
-                self.transform_img.append(
-                    tt.Normalize(num_img_channels * [0.5], num_img_channels * [0.5])
-                )
-                self.transform_seg.append(
-                    tt.Normalize(num_img_channels * [0.5], num_img_channels * [0.5])
-                )
-
-        self.transform_img = tt.Compose(self.transform_img)
-        self.transform_seg = tt.Compose(self.transform_seg)
         print(
             f"""
             Transform img: {self.transform_img},
@@ -190,11 +202,19 @@ class AmosDataset(Dataset):
             label = Image.open(seg_path)
 
         if self.transform_img:
-            img = self.transform_img(img)
+            img_transform = self.transform_img(img)
         if self.transform_seg:
-            label = self.transform_seg(label)
+            label_transform = self.transform_seg(label)
 
-        return {"images": img, "images_target": label}
+        if self.split == "test":
+            label_raw = self.transform_raw(label)
+            return {
+                "images": img_transform,
+                "images_target": label_transform,
+                "images_target_raw": label_raw,
+            }
+
+        return {"images": img_transform, "images_target": label_transform}
 
     def __len__(self):
         return len(self.dataset)
