@@ -19,23 +19,19 @@ source deactivate
 source activate py312
 
 python3 main.py \
-    --mode eval \
-    --img_size 256 \
+    --mode train \
+    --img_size 128 \
     --num_img_channels 1 \
     --dataset amos_ct_all_axis \
-    --img_dir /vol/miltank/projects/practical_WS2425/diffusion/data/test_data/images \
-    --seg_dir /vol/miltank/projects/practical_WS2425/diffusion/data/test_data/labels \
+    --img_dir /vol/aimspace/projects/practical_WS2425/diffusion/data/amos_robert_slices/images_all_axis \
+    --seg_dir /vol/aimspace/projects/practical_WS2425/diffusion/data/amos_robert_slices/labels_all_axis \
     --model_type DDIM \
     --segmentation_guided \
-    --segmentation_ingestion_mode concat \
     --segmentation_channel_mode single \
     --num_segmentation_classes 73 \
     --train_batch_size 8 \
     --eval_batch_size 8 \
     --num_epochs 100 \
-    --transforms "['ToTensor', 'Resize', 'CenterCrop', 'Normalize']" \
-    # --img_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/images_all_axis \
-    # --seg_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/labels_all_axis \
     # --resume_epoc 2 \
     # --img_name_filter /vol/aimspace/projects/practical_WS2425/diffusion/code/segmentation-guided-diffusion/utils/mask_CT.csv \
     # --use_ablated_segmentations \

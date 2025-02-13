@@ -4,7 +4,6 @@ model evaluation/sampling
 
 import math
 import os
-import sys
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
@@ -18,8 +17,6 @@ from matplotlib.colors import ListedColormap
 from torchvision.utils import save_image
 from tqdm import tqdm
 
-# cutom imports from ../utils
-sys.path.append("..")
 from utils.utils import make_grid
 
 ####################
@@ -478,7 +475,6 @@ def evaluate(
             f"{test_dir}/{epoch:04d}-{step:04d}_cond.png",
             normalize=True,
             nrow=cols,
-            padding=0,
         )
 
         # as well as original images that the segs belong to
@@ -488,7 +484,6 @@ def evaluate(
             f"{test_dir}/{epoch:04d}-{step:04d}_orig.png",
             normalize=True,
             nrow=cols,
-            padding=0,
         )
 
 
