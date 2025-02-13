@@ -19,7 +19,7 @@ source activate py312
 
 python main.py \
     --mode train \
-    --img_size 128 \
+    --img_size 256 \
     --num_img_channels 1 \
     --dataset amos_mri_all_axis \
     --img_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/images_all_axis \
