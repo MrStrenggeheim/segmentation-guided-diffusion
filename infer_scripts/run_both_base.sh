@@ -18,16 +18,15 @@ source deactivate
 source activate py312
 
 python main.py \
-    --mode train \
-    --img_size 128 \
+    --mode eval \
+    --img_size 256 \
     --num_img_channels 1 \
     --dataset amos_both_base \
-    --img_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/images \
-    --seg_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/labels \
+    --img_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/images_axial \
+    --seg_dir /vol/miltank/projects/practical_WS2425/diffusion/data/amos_robert_slices/labels_axial \
     --model_type DDIM \
     --segmentation_guided \
     --segmentation_ingestion_mode concat \
-    --segmentation_channel_mode single \
     --num_segmentation_classes 73 \
     --train_batch_size 16 \
     --eval_batch_size 16 \

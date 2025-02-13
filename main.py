@@ -212,7 +212,7 @@ def main(
             epoch_folders = [f for f in os.listdir(config.output_dir) if "epoch" in f]
             if len(epoch_folders) > 0:
                 last_ckpt_folder = sorted(epoch_folders)[-1]
-                config.start_epoch = int(last_ckpt_folder.split("_")[-1]) + 1
+                config.start_epoch = int(last_ckpt_folder.split("_")[-2]) + 1
                 if mode == "train":
                     print(
                         "resuming from last model from folder: {}".format(

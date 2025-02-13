@@ -35,7 +35,7 @@ class TrainingConfig:
     learning_rate: float = 1e-5  # was 1e-4
     lr_warmup_steps: int = 500
     save_model_epochs: int | float = (
-        0.25  # save model every n epochs or every n% of total epochs
+        0.1  # save model every n epochs or every n% of total epochs
     )
     mixed_precision: str = (
         "fp16"  # `no` for float32, `fp16` for automatic mixed precision
@@ -153,21 +153,17 @@ def train_loop(
             progress_bar.set_postfix(**logs)
             global_step += 1
 
-            if (
-                isinstance(config.save_model_epochs, float)
-                and (step + 1) % (len(train_dataloader) * config.save_model_epochs) == 0
-            ):
+            # if (
+            #     isinstance(config.save_model_epochs, float)
+            #     and (step + 1) % (len(train_dataloader) * config.save_model_epochs) == 0
+            # ):
+            if (step + 1) % 500 == 0:
                 eval_and_save(
                     config, model, noise_scheduler, eval_dataloader, epoch, step
                 )
 
         # After each epoch you optionally sample some demo images with evaluate() and save the model
-        if (
-            isinstance(config.save_model_epochs, int)
-            and (epoch + 1) % config.save_model_epochs == 0
-            or epoch == config.num_epochs - 1
-        ):
-            eval_and_save(config, model, noise_scheduler, eval_dataloader, epoch, step)
+        eval_and_save(config, model, noise_scheduler, eval_dataloader, epoch, step)
 
 
 def eval_and_save(config, model, noise_scheduler, eval_dataloader, epoch, step):

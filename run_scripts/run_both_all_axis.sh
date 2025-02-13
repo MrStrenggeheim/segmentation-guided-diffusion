@@ -27,7 +27,6 @@ python main.py \
     --model_type DDIM \
     --segmentation_guided \
     --segmentation_ingestion_mode concat \
-    --segmentation_channel_mode single \
     --num_segmentation_classes 73 \
     --train_batch_size 16 \
     --eval_batch_size 16 \
